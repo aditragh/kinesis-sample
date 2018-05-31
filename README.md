@@ -23,7 +23,7 @@ The sample consumer can be run using the following maven command using the exec 
 `mvn exec:java -Dexec.mainClass="com.aws.kinesis.sample.AmazonKinesisRecordConsumerSample" -Djava.util.logging.config.file=src/main/resources/application.properties`
 
 
-###Logging
+### Logging
 
 There are two branches in this repository. The branch dev is setup to use JDK14 logger and the branch log4j is setup to use log4j logging. 
 The '-Djava.util.logging.config.file=src/main/resources/application.properties' argument in the main command should only be used when runnig the applications from the dev branch.
