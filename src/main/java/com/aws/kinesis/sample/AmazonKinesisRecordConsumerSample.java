@@ -1,129 +1,107 @@
 package com.aws.kinesis.sample;
 
+import java.io.BufferedReader;
+import java.io.IOException;
+import java.io.InputStreamReader;
 import java.net.InetAddress;
 import java.util.UUID;
+import java.util.concurrent.ExecutionException;
+import java.util.concurrent.Future;
+import java.util.concurrent.TimeUnit;
+import java.util.concurrent.TimeoutException;
 
-import com.amazonaws.AmazonClientException;
-import com.amazonaws.auth.profile.ProfileCredentialsProvider;
-import com.amazonaws.services.dynamodbv2.AmazonDynamoDB;
-import com.amazonaws.services.dynamodbv2.AmazonDynamoDBClientBuilder;
-import com.amazonaws.services.kinesis.AmazonKinesis;
-import com.amazonaws.services.kinesis.AmazonKinesisClientBuilder;
-import com.amazonaws.services.kinesis.clientlibrary.interfaces.v2.IRecordProcessorFactory;
-import com.amazonaws.services.kinesis.clientlibrary.lib.worker.InitialPositionInStream;
-import com.amazonaws.services.kinesis.clientlibrary.lib.worker.KinesisClientLibConfiguration;
-import com.amazonaws.services.kinesis.clientlibrary.lib.worker.Worker;
-import com.amazonaws.services.kinesis.model.ResourceNotFoundException;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
+import software.amazon.awssdk.regions.Region;
+import software.amazon.awssdk.services.cloudwatch.CloudWatchAsyncClient;
+import software.amazon.awssdk.services.dynamodb.DynamoDbAsyncClient;
+import software.amazon.awssdk.services.kinesis.KinesisAsyncClient;
+import software.amazon.kinesis.common.ConfigsBuilder;
+import software.amazon.kinesis.coordinator.Scheduler;
+import software.amazon.awssdk.auth.credentials.DefaultCredentialsProvider;
 
-public class AmazonKinesisRecordConsumerSample 
-{
+public class AmazonKinesisRecordConsumerSample {
 	/*
-     * Before running the code:
-     *      Fill in your AWS access credentials in the provided credentials
-     *      file template, and be sure to move the file to the default location
-     *      (~/.aws/credentials) where the sample code will load the
-     *      credentials from.
-     *      https://console.aws.amazon.com/iam/home?#security_credential
-     *
-     * WARNING:
-     *      To avoid accidental leakage of your credentials, DO NOT keep
-     *      the credentials file in your source directory.
-     */
+	 * Before running the code: Fill in your AWS access credentials in the
+	 * provided credentials file template, and be sure to move the file to the
+	 * default location (~/.aws/credentials) where the sample code will load the
+	 * credentials from.
+	 * https://console.aws.amazon.com/iam/home?#security_credential
+	 *
+	 * WARNING: To avoid accidental leakage of your credentials, DO NOT keep the
+	 * credentials file in your source directory.
+	 */
 
-    public static final String SAMPLE_APPLICATION_STREAM_NAME = "kclnodejssample";
+	public static final String SAMPLE_APPLICATION_STREAM_NAME = "2.xTest";
 
-    private static final String SAMPLE_APPLICATION_NAME = "SampleKinesisApplication";
-    
-    private static final String REGION = "us-west-2";
+	private static final String SAMPLE_APPLICATION_NAME = "2.xApplication";
 
-    // Initial position in the stream when the application starts up for the first time.
-    // Position can be one of LATEST (most recent data) or TRIM_HORIZON (oldest available data)
-    private static final InitialPositionInStream SAMPLE_APPLICATION_INITIAL_POSITION_IN_STREAM =
-            InitialPositionInStream.LATEST;
+	private static final Region REGION = Region.US_WEST_2;
 
-    private static ProfileCredentialsProvider credentialsProvider;
+	private static final Logger log = LoggerFactory.getLogger(AmazonKinesisRecordConsumerSample.class);
 
-    private static void init() {
-        // Ensure the JVM will refresh the cached IP values of AWS resources (e.g. service endpoints).
-        java.security.Security.setProperty("networkaddress.cache.ttl", "60");
+	private static DefaultCredentialsProvider credentialsProvider;
 
-        /*
-         * The ProfileCredentialsProvider will return your [default]
-         * credential profile by reading from the credentials file located at
-         * (~/.aws/credentials).
-         */
-        credentialsProvider = new ProfileCredentialsProvider();
-        try {
-            credentialsProvider.getCredentials();
-        } catch (Exception e) {
-            throw new AmazonClientException("Cannot load the credentials from the credential profiles file. "
-                    + "Please make sure that your credentials file is at the correct "
-                    + "location (~/.aws/credentials), and is in valid format.", e);
-        }
-    }
+	private static void init() throws Exception {
+		// Ensure the JVM will refresh the cached IP values of AWS resources
+		// (e.g. service endpoints).
+		java.security.Security.setProperty("networkaddress.cache.ttl", "60");
 
-    public static void main(String[] args) throws Exception {
-        
-    	init();
+		/*
+		 * The ProfileCredentialsProvider will return your [default] credential
+		 * profile by reading from the credentials file located at
+		 * (~/.aws/credentials).
+		 */
+		credentialsProvider = DefaultCredentialsProvider.create();
+		try {
+			credentialsProvider.resolveCredentials();
+		} catch (Exception e) {
+			throw new Exception("Cannot load the credentials from the credential profiles file. "
+					+ "Please make sure that your credentials file is at the correct "
+					+ "location (~/.aws/credentials), and is in valid format.", e);
+		}
+	}
 
-        String workerId = InetAddress.getLocalHost().getCanonicalHostName() + ":" + UUID.randomUUID();
-        KinesisClientLibConfiguration kinesisClientLibConfiguration =
-                new KinesisClientLibConfiguration(SAMPLE_APPLICATION_NAME,
-                        SAMPLE_APPLICATION_STREAM_NAME,
-                        credentialsProvider,
-                        workerId);
-        kinesisClientLibConfiguration.withInitialPositionInStream(SAMPLE_APPLICATION_INITIAL_POSITION_IN_STREAM);
-        kinesisClientLibConfiguration.withRegionName(REGION);
+	public static void main(String[] args) throws Exception {
 
-        IRecordProcessorFactory recordProcessorFactory = new AmazonKinesisApplicationRecordProcessorFactory();
-        Worker worker = new Worker.Builder()
-        	    .recordProcessorFactory(recordProcessorFactory)
-        	    .config(kinesisClientLibConfiguration)
-        	    .build();
-        
-        System.out.printf("Running %s to process stream %s as worker %s...\n",
-                SAMPLE_APPLICATION_NAME,
-                SAMPLE_APPLICATION_STREAM_NAME,
-                workerId);
+		init();
 
-        int exitCode = 0;
-        try {
-        	worker.run();
-        } catch (Throwable t) {
-            System.err.println("Caught throwable while processing data.");
-            t.printStackTrace();
-            exitCode = 1;
-        }
-        System.exit(exitCode);
-    }
+		String workerId = InetAddress.getLocalHost().getCanonicalHostName() + ":" + UUID.randomUUID();
+		DynamoDbAsyncClient dynamoClient = DynamoDbAsyncClient.builder().region(REGION).build();
+		CloudWatchAsyncClient cloudWatchClient = CloudWatchAsyncClient.builder().region(REGION).build();
+		KinesisAsyncClient kinesisClient = KinesisAsyncClient.builder().region(REGION)
+				.credentialsProvider(credentialsProvider).build();
+		ConfigsBuilder configsBuilder = new ConfigsBuilder(SAMPLE_APPLICATION_STREAM_NAME, SAMPLE_APPLICATION_NAME,
+				kinesisClient, dynamoClient, cloudWatchClient, workerId,
+				new AmazonKinesisApplicationRecordProcessorFactory());
+		Scheduler scheduler = new Scheduler(configsBuilder.checkpointConfig(), configsBuilder.coordinatorConfig(),
+				configsBuilder.leaseManagementConfig(), configsBuilder.lifecycleConfig(),
+				configsBuilder.metricsConfig(), configsBuilder.processorConfig(), configsBuilder.retrievalConfig());
 
-    public static void deleteResources() {
-        // Delete the stream
-        AmazonKinesis kinesis = AmazonKinesisClientBuilder.standard()
-            .withCredentials(credentialsProvider)
-            .withRegion("us-west-2")
-            .build();
+		Thread schedulerThread = new Thread(scheduler);
+		schedulerThread.setDaemon(true);
+		schedulerThread.start();
 
-        System.out.printf("Deleting the Amazon Kinesis stream used by the sample. Stream Name = %s.\n",
-                SAMPLE_APPLICATION_STREAM_NAME);
-        try {
-            kinesis.deleteStream(SAMPLE_APPLICATION_STREAM_NAME);
-        } catch (ResourceNotFoundException ex) {
-            // The stream doesn't exist.
-        }
+		System.out.println("Press enter to shutdown");
+		BufferedReader reader = new BufferedReader(new InputStreamReader(System.in));
+		try {
+			reader.readLine();
+		} catch (IOException ioex) {
+			log.error("Caught exception while waiting for confirm.  Shutting down", ioex);
+		}
 
-        // Delete the table
-        AmazonDynamoDB dynamoDB = AmazonDynamoDBClientBuilder.standard()
-            .withCredentials(credentialsProvider)
-            .withRegion("us-west-2")
-            .build();
-        System.out.printf("Deleting the Amazon DynamoDB table used by the Amazon Kinesis Client Library. Table Name = %s.\n",
-                SAMPLE_APPLICATION_NAME);
-        try {
-            dynamoDB.deleteTable(SAMPLE_APPLICATION_NAME);
-        } catch (com.amazonaws.services.dynamodbv2.model.ResourceNotFoundException ex) {
-            // The table doesn't exist.
-        }
-    }
+		Future<Boolean> gracefulShutdownFuture = scheduler.startGracefulShutdown();
+		log.info("Waiting up to 20 seconds for shutdown to complete.");
+		try {
+			gracefulShutdownFuture.get(20, TimeUnit.SECONDS);
+		} catch (InterruptedException e) {
+			log.info("Interrupted while waiting for graceful shutdown. Continuing.");
+		} catch (ExecutionException e) {
+			log.error("Exception while executing graceful shutdown.", e);
+		} catch (TimeoutException e) {
+			log.error("Timeout while waiting for shutdown.  Scheduler may not have exited.");
+		}
+		log.info("Completed, shutting down now.");
+	}
 }
