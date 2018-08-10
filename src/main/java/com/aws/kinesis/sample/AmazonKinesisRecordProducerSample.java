@@ -2,6 +2,7 @@ package com.aws.kinesis.sample;
 
 import java.time.LocalDateTime;
 import java.util.List;
+import java.util.concurrent.ExecutionException;
 import java.util.concurrent.TimeUnit;
 
 import software.amazon.awssdk.regions.Region;
@@ -37,7 +38,7 @@ public class AmazonKinesisRecordProducerSample {
 	private static final Region REGION = Region.US_WEST_2;
 
 	private static KinesisAsyncClient kinesis;
-	
+
 	private static DefaultCredentialsProvider credentialsProvider;
 
 	private static void init() throws Exception {
@@ -55,22 +56,22 @@ public class AmazonKinesisRecordProducerSample {
 					+ "location (~/.aws/credentials), and is in valid format.", e);
 		}
 
-		kinesis = KinesisAsyncClient.builder().region(REGION)
-				.credentialsProvider(credentialsProvider).build();
+		kinesis = KinesisAsyncClient.builder().region(REGION).credentialsProvider(credentialsProvider).build();
 	}
 
 	public static void main(String[] args) throws Exception {
 		init();
 
 		final String myStreamName = SAMPLE_APPLICATION_STREAM_NAME;
-		final Integer myStreamSize = 1;
-		System.out.println(System.getProperty("StreamName"));
+		final Integer myStreamSize = 2;
 
 		// Describe the stream and check if it exists.
-		DescribeStreamRequest describeStreamRequest = DescribeStreamRequest.builder().streamName(SAMPLE_APPLICATION_STREAM_NAME).build();
+		DescribeStreamRequest describeStreamRequest = DescribeStreamRequest.builder()
+				.streamName(SAMPLE_APPLICATION_STREAM_NAME).build();
 		try {
-			
-			StreamDescription streamDescription = kinesis.describeStream(describeStreamRequest).get().streamDescription();
+
+			StreamDescription streamDescription = kinesis.describeStream(describeStreamRequest).get()
+					.streamDescription();
 			StreamStatus status = streamDescription.streamStatus();
 			System.out.printf("Stream %s has a status of %s.\n", myStreamName, status);
 
@@ -83,25 +84,31 @@ public class AmazonKinesisRecordProducerSample {
 			if (!StreamStatus.ACTIVE.equals(status)) {
 				waitForStreamToBecomeAvailable(myStreamName);
 			}
-		} catch (ResourceNotFoundException ex) {
-			System.out.printf("Stream %s does not exist. Creating it now.\n", myStreamName);
+		} catch (ExecutionException e) {
+			if (e.getCause().getClass() == ResourceNotFoundException.class) {
+				System.out.printf("Stream %s does not exist. Creating it now.\n", myStreamName);
 
-			// Create a stream. The number of shards determines the provisioned
-			// throughput.
-			CreateStreamRequest createStreamRequest = CreateStreamRequest.builder().streamName(myStreamName).shardCount(myStreamSize).build();
-			kinesis.createStream(createStreamRequest).get();
-			// The stream is now being created. Wait for it to become active.
-			waitForStreamToBecomeAvailable(myStreamName);
+				// Create a stream. The number of shards determines the
+				// provisioned
+				// throughput.
+				CreateStreamRequest createStreamRequest = CreateStreamRequest.builder().streamName(myStreamName)
+						.shardCount(myStreamSize).build();
+				kinesis.createStream(createStreamRequest).get();
+				// The stream is now being created. Wait for it to become
+				// active.
+				waitForStreamToBecomeAvailable(myStreamName);
+			}
 		}
 
 		// List all of my streams.
-		
+
 		ListStreamsRequest listStreamsRequest = ListStreamsRequest.builder().limit(10).build();
 		ListStreamsResponse listStreamsResult = kinesis.listStreams(listStreamsRequest).get();
 		List<String> streamNames = listStreamsResult.streamNames();
 		while (listStreamsResult.hasMoreStreams()) {
-			if (streamNames.size() > 0) {				
-				listStreamsRequest = ListStreamsRequest.builder().limit(10).exclusiveStartStreamName(streamNames.get(streamNames.size() - 1)).build();
+			if (streamNames.size() > 0) {
+				listStreamsRequest = ListStreamsRequest.builder().limit(10)
+						.exclusiveStartStreamName(streamNames.get(streamNames.size() - 1)).build();
 			}
 			listStreamsResult = kinesis.listStreams(listStreamsRequest).get();
 			streamNames.addAll(listStreamsResult.streamNames());
@@ -117,15 +124,15 @@ public class AmazonKinesisRecordProducerSample {
 		// Write records to the stream until this program is aborted.
 		while (true) {
 			long createTime = System.currentTimeMillis();
-			Builder putRecordRequestBuilder = PutRecordRequest.builder().data(new StringToSdkBytesAdapter()
+			Builder putRecordRequestBuilder = PutRecordRequest.builder()
+					.data(new StringToSdkBytesAdapter()
 							.adapt(String.format("testData-" + LocalDateTime.now().toString())))
 					.streamName(myStreamName).partitionKey(String.format("partitionKey-%d", createTime));
 
 			PutRecordRequest putRecordRequest = putRecordRequestBuilder.build();
 			PutRecordResponse putRecordResult = kinesis.putRecord(putRecordRequest).get();
 			System.out.printf("Successfully put record, partition key : %s, ShardID : %s, SequenceNumber : %s.\n",
-					putRecordRequest.partitionKey(), putRecordResult.shardId(),
-					putRecordResult.sequenceNumber());
+					putRecordRequest.partitionKey(), putRecordResult.shardId(), putRecordResult.sequenceNumber());
 			Thread.sleep(500);
 		}
 	}
@@ -136,26 +143,25 @@ public class AmazonKinesisRecordProducerSample {
 		long startTime = System.currentTimeMillis();
 		long endTime = startTime + TimeUnit.MINUTES.toMillis(10);
 		while (System.currentTimeMillis() < endTime) {
-			Thread.sleep(TimeUnit.SECONDS.toMillis(20));
-			DescribeStreamRequest describeStreamRequest = DescribeStreamRequest.builder().build();
+			Thread.sleep(TimeUnit.SECONDS.toMillis(10));
+			DescribeStreamRequest describeStreamRequest = DescribeStreamRequest.builder()
+					.streamName(SAMPLE_APPLICATION_STREAM_NAME).build();
 			StreamDescription streamDescription = null;
 			try {
 				streamDescription = kinesis.describeStream(describeStreamRequest).get().streamDescription();
-
-			} catch (ResourceNotFoundException ex) {
-				// ResourceNotFound means the stream doesn't exist yet,
-				// so ignore this error and just keep polling.
-			} catch (AwsServiceException ase) {
-				throw ase;
-			} catch (Exception e) {
-				System.out.println("There was an unhandled exception");
-			}
-			StreamStatus status = streamDescription.streamStatus();
-			System.out.printf("Stream %s has a status of %s.\n", myStreamName, status);
-
-			// Wait for the stream to become active if it is not yet ACTIVE.
-			if (!StreamStatus.ACTIVE.equals(status)) {
+				StreamStatus status = streamDescription.streamStatus();
+				// Wait for the stream to become active if it is not yet ACTIVE.
+				if (!StreamStatus.ACTIVE.equals(status)) {
+					System.out.printf("Stream %s has a status of %s.\n", myStreamName,
+							status + " Waiting for stream to become active....");
+					continue;
+				}
+				System.out.println("Stream is now active");
 				return;
+
+			} catch (ExecutionException e) {
+				if (e.getCause().getClass() == ResourceNotFoundException.class) {
+				}
 			}
 		}
 		throw new RuntimeException(String.format("Stream %s never became active", myStreamName));
